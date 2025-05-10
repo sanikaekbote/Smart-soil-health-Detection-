@@ -1,0 +1,120 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Wire.h>
+#include <DHT.h>
+
+// --- DHT22 Sensor ---
+#define DHTPIN 4
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE);
+
+// --- Soil Moisture & Relay ---
+const int sensor_pin = 34;     // Analog pin for soil moisture sensor
+const int RELAY_PIN = 22;      // Digital pin for relay
+
+// --- Serial2 Communication (NPK from Arduino) ---
+#define RX_PIN 16
+#define TX_PIN 17
+
+// --- WiFi Credentials ---
+const char* ssid = "realme C33";
+const char* password = "08520852";
+
+// --- API Server ---
+const char* serverBase = "http://precisewms.in:5012/kisanmitra/trans/trans";
+
+// --- NPK Values ---
+int nValue = 0, pValue = 0, kValue = 0;
+
+void setup() {
+  Serial.begin(115200);
+  Serial2.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  dht.begin();
+
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, LOW);  // Pump OFF initially
+
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+}
+
+void loop() {
+  // --- Read Temperature and Humidity ---
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+
+  // --- Read Soil Moisture ---
+  int analogValue = analogRead(sensor_pin);
+  int moisture = 100 - ((analogValue / 4095.0) * 100);  // Invert to get % moisture
+
+  Serial.printf("\nTemperature: %.2f °C\nHumidity: %.2f %%\nSoil Moisture: %d %%\n",
+                temperature, humidity, moisture);
+
+  // --- Relay Control based on Moisture ---
+  if (moisture < 40) {
+    digitalWrite(RELAY_PIN, HIGH);
+    Serial.println("Soil is dry => Pump ON");
+  } else {
+    digitalWrite(RELAY_PIN, LOW);
+    Serial.println("Soil is wet => Pump OFF");
+  }
+
+  // --- Read NPK from Arduino via Serial2 ---
+  if (Serial2.available()) {
+    String receivedData = Serial2.readStringUntil('\n');
+    Serial.print("Received from Arduino: ");
+    Serial.println(receivedData);
+
+    int firstComma = receivedData.indexOf(',');
+    int secondComma = receivedData.indexOf(',', firstComma + 1);
+
+    if (firstComma > 0 && secondComma > firstComma) {
+      nValue = receivedData.substring(0, firstComma).toInt();
+      pValue = receivedData.substring(firstComma + 1, secondComma).toInt();
+      kValue = receivedData.substring(secondComma + 1).toInt();
+    }
+
+    Serial.printf("N: %d mg/kg, P: %d mg/kg, K: %d mg/kg\n", nValue, pValue, kValue);
+  }
+
+  // --- Send All Data to Server as CSV ---
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+
+    // Build comma-separated string
+    String csvData = String(temperature, 2) + "," + String(humidity, 2) + "," + String(moisture) + "," +
+                     String(nValue) + "," + String(pValue) + "," + String(kValue);
+
+    String serverURL = String(serverBase) + "?data=" + csvData;
+
+    Serial.println("Sending CSV Payload: " + csvData);
+    Serial.println("Request URL: " + serverURL);
+
+    http.begin(serverURL);
+    int httpResponseCode = http.GET();
+
+    if (httpResponseCode > 0) {
+      Serial.printf("HTTP Response Code: %d\n", httpResponseCode);
+      if (httpResponseCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        Serial.println("Server Response:");
+        Serial.println(payload);
+      }
+    } else {
+      Serial.print("HTTP Error: ");
+      Serial.println(http.errorToString(httpResponseCode));
+    }
+
+    http.end();
+  } else {
+    Serial.println("WiFi not connected. Data not sent.");
+  }
+
+  delay(10000);  // Wait 10 seconds before next cycle
+}
