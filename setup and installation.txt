@@ -1,0 +1,12 @@
+Setup and Installation Process
+
+
+1. Circuit Assembly: Connect all sensors to ESP32 following the circuit diagram. Relay controls the water pump.
+2. Power Source: 12V battery.
+3. Mounting: Place sensors at root-level depth in the soil. Position ESP32 and relay in a waterproof enclosure.
+4. Programming: Flash the ESP32 with Arduino IDE using the custom code.
+                Flash the Arduino uno with Arduino IDE using the custom code.
+
+5. Connectivity: Connect ESP32 to Wi-Fi for cloud and app integration (ThingSpeak/Blynk/App).
+6. Mobile App Configuration: Add device ID and configure thresholds in the app dashboard.
+ 
